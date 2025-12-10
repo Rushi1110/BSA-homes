@@ -66,9 +66,9 @@ def load_data(csv_path):
     return df
 
 try:
-    df = load_data("Homes (22).csv")
+    df = load_data("Homes.csv")
 except FileNotFoundError:
-    st.error("CSV file not found. Please ensure 'Homes (22).csv' is in the app directory.")
+    st.error("CSV file not found. Please ensure 'Homes.csv' is in the app directory.")
     st.stop()
 
 # --- SIDEBAR LOGOUT BUTTON ---
@@ -236,4 +236,5 @@ if not similar_homes.empty:
     display_cols = ['House_ID', 'Internal/Status', 'Home/Configuration', 'Home/Ask_Price (lacs)', 'Home/Area (super-builtup)', 'Distance_km']
     st.dataframe(similar_homes[display_cols].style.format({"Distance_km": "{:.2f} km"}))
 elif reference_house_id == "None":
+
     st.info("Select a 'Reference House' from the sidebar to see similar property recommendations.")
