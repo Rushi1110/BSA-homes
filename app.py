@@ -7,10 +7,19 @@ import re
 
 st.set_page_config(layout="wide", page_title="Jumbo Homes")
 
-# --- CUSTOM CSS (Minimal - Just hiding the Deploy button) ---
+# --- CUSTOM CSS (Hide Deploy, Edit, and other Streamlit UI elements) ---
 hide_st_style = """
             <style>
             .stDeployButton {display:none;}
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            .viewerBadge_container__1QSob {display: none;}
+            .styles_viewerBadge__1yB5_ {display: none;}
+            #MainMenu {visibility: hidden;}
+            button[title="View app source"] {display: none;}
+            .stActionButton {display: none;}
+            [data-testid="stToolbar"] {display: none;}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -18,6 +27,13 @@ st.markdown(hide_st_style, unsafe_allow_html=True)
 # ==========================================
 #  ✅ MAIN APP LOGIC
 # ==========================================
+
+# Initialize session state for logout/reset
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = True
+
+if 'reset_filters' not in st.session_state:
+    st.session_state.reset_filters = False
 
 # --- 1. FAST MATH FUNCTIONS ---
 def haversine_vectorized(lat1, lon1, lat2_array, lon2_array):
@@ -90,8 +106,14 @@ with col_nav1:
     st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=150)
 
 with col_nav2:
-    if st.button("Logout", use_container_width=True):
-        st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
+    if st.button("Logout", use_container_width=True, key="logout_btn"):
+        st.session_state.logged_in = False
+        st.rerun()
+
+# Check if user logged out
+if not st.session_state.logged_in:
+    st.info("You have been logged out. Please refresh the page to log in again.")
+    st.stop()
 
 st.divider()
 
@@ -99,17 +121,26 @@ st.divider()
 
 c1, c2, c3 = st.columns([3, 1.5, 0.5])
 
+# Handle reset
+if st.session_state.reset_filters:
+    st.session_state.reset_filters = False
+    st.rerun()
+
 with c1:
-    search_query = st.text_input("Search", placeholder="🔍 Search Locality, Project, or ID...", label_visibility="collapsed")
+    search_query = st.text_input("Search", placeholder="🔍 Search Locality, Project, or ID...", label_visibility="collapsed", key="search_input")
 
 with c2:
     all_statuses = sorted(df['Internal/Status'].unique().tolist())
     default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
-    selected_statuses = st.multiselect("Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Filter Status")
+    selected_statuses = st.multiselect("Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Filter Status", key="status_select")
 
 with c3:
-    if st.button("🔄", help="Reset Filters", use_container_width=True):
-         st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
+    if st.button("🔄", help="Reset Filters", use_container_width=True, key="reset_btn"):
+        # Clear all session state related to filters
+        st.session_state.search_input = ""
+        st.session_state.status_select = default_statuses
+        st.session_state.reset_filters = True
+        st.rerun()
 
 # --- 5. LOGIC ENGINE ---
 
