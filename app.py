@@ -5,39 +5,24 @@ from streamlit_folium import st_folium
 import numpy as np
 import re
 
-# --- 0. AUTHENTICATION CONFIG ---
-ADMIN_USER = "admin"
-ADMIN_PASS = "admin"
-
 st.set_page_config(layout="wide", page_title="Jumbo Homes - Discovery Portal")
 
-# --- 1. AUTHENTICATION LOGIC ---
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-
-def check_login():
-    user = st.session_state.get('input_user', '')
-    pwd = st.session_state.get('input_password', '')
-    if user == ADMIN_USER and pwd == ADMIN_PASS:
-        st.session_state.authenticated = True
-    else:
-        st.error("😕 Incorrect Username or Password")
-
-if not st.session_state.authenticated:
-    col1, col2, col3 = st.columns([1,1,1])
-    with col2:
-        st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=200)
-        st.markdown("### Internal Login")
-        st.text_input("Username", key="input_user")
-        st.text_input("Password", type="password", key="input_password")
-        st.button("Login", on_click=check_login, type="primary")
-    st.stop()
+# --- HIDE STREAMLIT DEFAULT BUTTONS & HEADER ---
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            .stDeployButton {display:none;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # ==========================================
-#  ✅ MAIN APP STARTS HERE
+#  ✅ MAIN APP LOGIC
 # ==========================================
 
-# --- 2. FAST MATH FUNCTIONS ---
+# --- 1. FAST MATH FUNCTIONS ---
 def haversine_vectorized(lat1, lon1, lat2_array, lon2_array):
     R = 6371.0
     lat1, lon1 = np.radians(lat1), np.radians(lon1)
@@ -48,15 +33,17 @@ def haversine_vectorized(lat1, lon1, lat2_array, lon2_array):
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
     return R * c
 
-# --- 3. DATA LOADING & CLEANING ---
+# --- 2. DATA LOADING & CLEANING ---
 @st.cache_data
 def load_data(csv_path):
     df = pd.read_csv(csv_path)
     
+    # Force numeric coords
     df['Building/Lat'] = pd.to_numeric(df['Building/Lat'], errors='coerce')
     df['Building/Long'] = pd.to_numeric(df['Building/Long'], errors='coerce')
     df = df.dropna(subset=['Building/Lat', 'Building/Long'])
     
+    # Clean Price
     def clean_price(val):
         try:
             return float(val)
@@ -64,12 +51,14 @@ def load_data(csv_path):
             return None
     df['Clean_Price'] = df['Home/Ask_Price (lacs)'].apply(clean_price)
     
+    # Clean Config
     def extract_bhk(val):
         if pd.isna(val): return 0
         match = re.search(r'(\d+)', str(val))
         return int(match.group(1)) if match else 0
     df['BHK_Num'] = df['Home/Configuration'].apply(extract_bhk)
     
+    # Fill text gaps
     df['Internal/Status'] = df['Internal/Status'].fillna('Unknown')
     df['Building/Locality'] = df['Building/Locality'].fillna('')
     
@@ -81,13 +70,9 @@ except FileNotFoundError:
     st.error("❌ Critical Error: 'Homes.csv' not found.")
     st.stop()
 
-# --- 4. SIDEBAR CONTROLS ---
+# --- 3. SIDEBAR CONTROLS ---
 
 st.sidebar.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", use_container_width=True)
-if st.sidebar.button("Logout", icon="🔒"):
-    st.session_state.authenticated = False
-    st.rerun()
-
 st.sidebar.divider()
 
 # Section A: Filter & Search
@@ -152,7 +137,7 @@ if reference_house_id != "Select a House...":
         similar_homes = similar_homes.sort_values(by="Clean_Price", ascending=True)
     st.sidebar.metric("Similar Homes Found", len(similar_homes))
 
-# --- 5. MAIN MAP ---
+# --- 4. MAIN MAP ---
 st.title("Discovery Portal")
 with st.expander("ℹ️ **How to use this tool**"):
     st.markdown("""
@@ -183,15 +168,14 @@ if not similar_homes.empty: special_ids.extend(similar_homes['House_ID'].tolist(
 if not search_matches.empty: special_ids.extend(search_matches['House_ID'].tolist())
 if reference_house_id != "Select a House...": special_ids.append(reference_house_id)
 
-# 1. BLUE LAYER (General Inventory) - NOW USING STANDARD PINS
-# We filter out the special IDs so we don't draw double pins
+# 1. BLUE LAYER (General Inventory)
 blue_df = filtered_df[~filtered_df['House_ID'].isin(special_ids)]
 
 for _, row in blue_df.iterrows():
     folium.Marker(
         location=[row['Building/Lat'], row['Building/Long']],
         tooltip=create_tooltip(row),
-        icon=folium.Icon(color="blue", icon="home", prefix="fa"), # <--- CHANGED TO PIN
+        icon=folium.Icon(color="blue", icon="home", prefix="fa"), 
     ).add_to(m)
 
 # 2. GREEN LAYER (Similar)
