@@ -7,12 +7,14 @@ import re
 
 st.set_page_config(layout="wide", page_title="Jumbo Homes - Discovery Portal")
 
-# --- HIDE STREAMLIT STYLE (FIXED) ---
-# We removed 'header {visibility: hidden;}' so the Sidebar Toggle remains visible.
+# --- HIDE STREAMLIT DEFAULT BUTTONS (THE FIX) ---
+# We hide the 'stToolbar' (top right) but keep the sidebar toggle (top left)
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
+            [data-testid="stToolbar"] {visibility: hidden !important;}
+            [data-testid="stDecoration"] {display: none;}
             .stDeployButton {display:none;}
             </style>
             """
