@@ -25,13 +25,38 @@ hide_st_style = """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # ==========================================
+#  🔐 LOGIN AUTHENTICATION
+# ==========================================
+
+# Initialize session state for login
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+# Login Screen
+if not st.session_state.logged_in:
+    st.markdown("<h1 style='text-align: center;'>🏠 Jumbo Homes</h1>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center;'>Please Login</h3>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        username = st.text_input("Username", placeholder="Enter username")
+        password = st.text_input("Password", type="password", placeholder="Enter password")
+        
+        if st.button("Login", use_container_width=True):
+            if username == "admin" and password == "admin":
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password")
+    
+    st.stop()
+
+# ==========================================
 #  ✅ MAIN APP LOGIC
 # ==========================================
 
-# Initialize session state for logout/reset
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = True
-
+# Initialize session state for reset
 if 'reset_filters' not in st.session_state:
     st.session_state.reset_filters = False
 
@@ -109,11 +134,6 @@ with col_nav2:
     if st.button("Logout", use_container_width=True, key="logout_btn"):
         st.session_state.logged_in = False
         st.rerun()
-
-# Check if user logged out
-if not st.session_state.logged_in:
-    st.info("You have been logged out. Please refresh the page to log in again.")
-    st.stop()
 
 st.divider()
 
