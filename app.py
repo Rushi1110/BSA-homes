@@ -7,7 +7,7 @@ import re
 
 st.set_page_config(layout="wide", page_title="Jumbo Homes")
 
-# --- CUSTOM CSS (Clean, but not broken) ---
+# --- CUSTOM CSS ---
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -16,7 +16,7 @@ hide_st_style = """
             [data-testid="stDecoration"] {display: none;}
             .stDeployButton {display:none;}
             
-            /* Remove top padding but keep it safe */
+            /* Remove default top padding */
             .block-container {
                 padding-top: 1rem !important;
                 padding-bottom: 0rem !important;
@@ -91,42 +91,37 @@ except FileNotFoundError:
     st.error("❌ Critical Error: 'Homes.csv' not found.")
     st.stop()
 
-# --- 3. UI LAYOUT ---
+# --- 3. HEADER & CONTROLS ---
 
-# ROW 1: TOP RIBBON (Logo + Logout)
-row1_col1, row1_col2 = st.columns([6, 1])
-
-with row1_col1:
+# HEADER ROW: Logo and Logout ONLY
+header_col1, header_col2 = st.columns([6, 1], gap="medium")
+with header_col1:
     st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=140)
-
-with row1_col2:
+with header_col2:
     if st.button("Logout", use_container_width=True):
         st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
 
-st.write("") # Spacer
+st.divider() # <--- CLEAR SEPARATION
 
-# ROW 2: CONTROLS (Search + Filters + Reset)
-# We use a container to visually group them
-with st.container():
-    col1, col2, col3 = st.columns([3, 1.5, 0.5])
+# CONTROLS ROW: Search, Status, Reset (Below the header)
+ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([3, 1.5, 0.5], gap="small")
 
-    with col1:
-        search_query = st.text_input("Search", placeholder="🔍 Search Locality, Project, or ID...", label_visibility="collapsed")
+with ctrl_col1:
+    search_query = st.text_input("Search", placeholder="🔍 Locality, Project, ID...", label_visibility="collapsed")
 
-    with col2:
-        all_statuses = sorted(df['Internal/Status'].unique().tolist())
-        default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
-        selected_statuses = st.multiselect("Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Filter Status")
+with ctrl_col2:
+    all_statuses = sorted(df['Internal/Status'].unique().tolist())
+    default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
+    selected_statuses = st.multiselect("Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Filter Status")
 
-    with col3:
-        if st.button("🔄", help="Reset Filters"):
-            st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
+with ctrl_col3:
+    if st.button("🔄", help="Reset All Filters", use_container_width=True):
+         st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
 
 # --- 4. LOGIC ENGINE ---
 
 filtered_df = df[df['Internal/Status'].isin(selected_statuses)]
 
-# Search Logic
 search_matches = pd.DataFrame()
 if search_query:
     mask = (
@@ -178,10 +173,8 @@ with st.expander("🛠️ Comparison Tools (Find Similar Homes)", expanded=False
             similar_homes = candidates[(candidates['Distance_km'] <= dist_radius) & (candidates['House_ID'] != reference_house_id)]
             similar_homes = similar_homes.sort_values(by="Clean_Price", ascending=True)
 
-
 # --- 6. MAP VISUALIZATION ---
 
-# Center Logic
 if not search_matches.empty:
     center_lat, center_long, zoom = search_matches['Building/Lat'].mean(), search_matches['Building/Long'].mean(), 12
 elif reference_house_id != "Select a House...":
@@ -191,7 +184,6 @@ else:
 
 m = folium.Map(location=[center_lat, center_long], zoom_start=zoom, prefer_canvas=True)
 
-# --- TOOLTIP HELPERS ---
 def create_table_row(row, bg_color="#fff", bold=False):
     status_icon = {'✅ Live': '✅', '☑️ Sold': '🔴', '⏳On Hold': 'Of', 'Unknown': '❓'}.get(row['Internal/Status'], '🔹')
     price_txt = f"{row['Clean_Price']}L" if pd.notnull(row['Clean_Price']) else "N/A"
@@ -217,30 +209,25 @@ def create_context_tooltip(target_row, full_df, label):
     html += "</table></div>"
     return html
 
-# Separate datasets
 special_ids = []
 if not similar_homes.empty: special_ids.extend(similar_homes['House_ID'].tolist())
 if not search_matches.empty: special_ids.extend(search_matches['House_ID'].tolist())
 if reference_house_id != "Select a House...": special_ids.append(reference_house_id)
 
-# 1. BLUE LAYER (General)
 blue_df = filtered_df[~filtered_df['House_ID'].isin(special_ids)]
 grouped = blue_df.groupby(['Building/Name', 'Building/Lat', 'Building/Long', 'Building/Locality'])
 for (name, lat, lon, loc), group in grouped:
     folium.Marker([lat, lon], popup=folium.Popup(create_building_tooltip(group, name, loc), max_width=300), tooltip=f"{name} ({len(group)} Units)", icon=folium.Icon(color="blue", icon="building", prefix="fa")).add_to(m)
 
-# 2. GREEN LAYER (Similar)
 if not similar_homes.empty:
     for _, row in similar_homes.iterrows():
         folium.Marker([row['Building/Lat'], row['Building/Long']], popup=folium.Popup(create_context_tooltip(row, df, "SIMILAR MATCH"), max_width=300), tooltip=f"Similar: {row['House_ID']}", icon=folium.Icon(color="green", icon="thumbs-up", prefix="fa")).add_to(m)
 
-# 3. RED LAYER (Search)
 if not search_matches.empty:
     for _, row in search_matches.iterrows():
         if not similar_homes.empty and row['House_ID'] in similar_homes['House_ID'].values: continue
         folium.Marker([row['Building/Lat'], row['Building/Long']], popup=folium.Popup(create_context_tooltip(row, df, "SEARCH RESULT"), max_width=300), tooltip=f"Match: {row['House_ID']}", icon=folium.Icon(color="red", icon="star", prefix="fa")).add_to(m)
 
-# 4. BLACK LAYER (Reference)
 if reference_house_id != "Select a House...":
     folium.Marker([ref_house['Building/Lat'], ref_house['Building/Long']], popup=folium.Popup(create_context_tooltip(ref_house, df, "REFERENCE HOUSE"), max_width=300), tooltip="REFERENCE HOUSE", icon=folium.Icon(color="black", icon="user", prefix="fa")).add_to(m)
 
