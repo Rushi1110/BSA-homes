@@ -5,9 +5,9 @@ from streamlit_folium import st_folium
 import numpy as np
 import re
 
-st.set_page_config(layout="wide", page_title="Jumbo Homes - Discovery Portal")
+st.set_page_config(layout="wide", page_title="Jumbo Homes")
 
-# --- CUSTOM CSS FOR CLEAN LOOK ---
+# --- CUSTOM CSS FOR COMPACT LOOK ---
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -16,9 +16,21 @@ hide_st_style = """
             [data-testid="stDecoration"] {display: none;}
             .stDeployButton {display:none;}
             
-            /* Add some padding to top since we removed header */
+            /* REMOVE TOP PADDING ("Super Small" Header) */
             .block-container {
-                padding-top: 2rem;
+                padding-top: 0rem !important;
+                padding-bottom: 0rem !important;
+                margin-top: 1rem !important;
+            }
+            
+            /* Compact Columns */
+            div[data-testid="column"] {
+                padding: 0px;
+            }
+            
+            /* Remove gap between elements */
+            .st-emotion-cache-1y4p8pa {
+                padding-top: 0px;
             }
             </style>
             """
@@ -90,27 +102,25 @@ except FileNotFoundError:
     st.error("❌ Critical Error: 'Homes.csv' not found.")
     st.stop()
 
-# --- 3. TOP NAVIGATION BAR ---
+# --- 3. COMPACT TOP BAR ---
 
-# Define Columns: Logo | Search | Filter | Logout
-col1, col2, col3, col4 = st.columns([1, 4, 2, 1], gap="small")
+# 4 Columns: Logo (Small) | Search | Filter | Reset
+col1, col2, col3, col4 = st.columns([0.5, 3, 1.5, 0.5], gap="small")
 
 with col1:
-    st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=120)
+    st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=80)
 
 with col2:
-    search_query = st.text_input("🔍 Search", placeholder="Locality, Project, or House ID...", label_visibility="collapsed")
+    search_query = st.text_input("Search", placeholder="🔍 Search Locality, Project, ID...", label_visibility="collapsed")
 
 with col3:
     all_statuses = sorted(df['Internal/Status'].unique().tolist())
     default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
-    selected_statuses = st.multiselect("Filter Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Filter Status")
+    selected_statuses = st.multiselect("Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Status")
 
 with col4:
-    # A cleaner logout that just reloads the page (Streamlit handles auth via cookie in Option A)
-    # If strictly using Option A (Streamlit Auth), this button is just visual unless we clear session.
-    # We'll just make it clear the query params or rerun.
-    if st.button("Logout", type="secondary", use_container_width=True):
+    # "Clear" button to quickly reset filters/search
+    if st.button("🔄", help="Reset App"):
         st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
 
 
@@ -128,16 +138,15 @@ if search_query:
     )
     search_matches = filtered_df[mask]
 
-# --- 5. "SIMILAR HOMES" EXPANDER (Hidden by default to keep UI clean) ---
+# --- 5. "SIMILAR HOMES" EXPANDER (Hidden by default) ---
 
 similar_homes = pd.DataFrame()
 ref_house = None
 reference_house_id = "Select a House..."
 
-with st.expander("🛠️ Compare & Analyze (Find Similar Homes)", expanded=False):
+with st.expander("🛠️ Comparison Tools (Similar Homes)", expanded=False):
     c_adv1, c_adv2, c_adv3 = st.columns([2, 1, 1])
     
-    # Dropdown Logic
     candidate_homes = search_matches if not search_matches.empty else filtered_df
     with c_adv1:
         reference_house_id = st.selectbox("Select Reference House", options=["Select a House..."] + candidate_homes['House_ID'].tolist())
@@ -148,10 +157,9 @@ with st.expander("🛠️ Compare & Analyze (Find Similar Homes)", expanded=Fals
     with c_adv3:
         dist_radius = st.slider("Radius (km)", 0.5, 10.0, 2.0)
 
-    # Calculation Logic
     if reference_house_id != "Select a House...":
         ref_house = df[df['House_ID'] == reference_house_id].iloc[0]
-        st.info(f"**Selected:** {ref_house['Building/Name']} | {ref_house['Building/Locality']} | {ref_house['Home/Configuration']} | {ref_house['Clean_Price']} L")
+        st.info(f"**Ref:** {ref_house['Building/Name']} | {ref_house['Building/Locality']} | {ref_house['Home/Configuration']} | {ref_house['Clean_Price']} L")
         
         valid_status_mask = df['Internal/Status'].isin(default_statuses)
         config_mask = df['BHK_Num'] >= ref_house['BHK_Num']
