@@ -7,8 +7,7 @@ import re
 
 st.set_page_config(layout="wide", page_title="Jumbo Homes - Discovery Portal")
 
-# --- HIDE STREAMLIT DEFAULT BUTTONS (THE FIX) ---
-# We hide the 'stToolbar' (top right) but keep the sidebar toggle (top left)
+# --- CUSTOM CSS FOR CLEAN LOOK ---
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -16,6 +15,11 @@ hide_st_style = """
             [data-testid="stToolbar"] {visibility: hidden !important;}
             [data-testid="stDecoration"] {display: none;}
             .stDeployButton {display:none;}
+            
+            /* Add some padding to top since we removed header */
+            .block-container {
+                padding-top: 2rem;
+            }
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -53,7 +57,7 @@ def load_data(csv_path):
             return None
     df['Clean_Price'] = df['Home/Ask_Price (lacs)'].apply(clean_price)
     
-    # Clean Price Per Sqft (For Sorting)
+    # Clean Price Per Sqft
     def clean_psqft(val):
         try:
             clean_str = re.sub(r'[^\d.]', '', str(val))
@@ -86,19 +90,31 @@ except FileNotFoundError:
     st.error("❌ Critical Error: 'Homes.csv' not found.")
     st.stop()
 
-# --- 3. SIDEBAR CONTROLS ---
+# --- 3. TOP NAVIGATION BAR ---
 
-st.sidebar.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", use_container_width=True)
-st.sidebar.divider()
+# Define Columns: Logo | Search | Filter | Logout
+col1, col2, col3, col4 = st.columns([1, 4, 2, 1], gap="small")
 
-# Section A: Filter & Search
-st.sidebar.subheader("🔍 Search Inventory")
-search_query = st.sidebar.text_input("Search (Locality, Project, ID)", placeholder="e.g. Whitefield, Godrej...")
+with col1:
+    st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=120)
 
-# Status Filter
-all_statuses = sorted(df['Internal/Status'].unique().tolist())
-default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
-selected_statuses = st.sidebar.multiselect("Filter Status", options=all_statuses, default=default_statuses)
+with col2:
+    search_query = st.text_input("🔍 Search", placeholder="Locality, Project, or House ID...", label_visibility="collapsed")
+
+with col3:
+    all_statuses = sorted(df['Internal/Status'].unique().tolist())
+    default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
+    selected_statuses = st.multiselect("Filter Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Filter Status")
+
+with col4:
+    # A cleaner logout that just reloads the page (Streamlit handles auth via cookie in Option A)
+    # If strictly using Option A (Streamlit Auth), this button is just visual unless we clear session.
+    # We'll just make it clear the query params or rerun.
+    if st.button("Logout", type="secondary", use_container_width=True):
+        st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
+
+
+# --- 4. LOGIC ENGINE ---
 
 filtered_df = df[df['Internal/Status'].isin(selected_statuses)]
 
@@ -111,56 +127,53 @@ if search_query:
         filtered_df['Building/Locality'].astype(str).str.contains(search_query, case=False, na=False)
     )
     search_matches = filtered_df[mask]
-    if not search_matches.empty:
-        st.sidebar.success(f"Found {len(search_matches)} matches")
-    else:
-        st.sidebar.warning("No matches found")
 
-st.sidebar.divider()
-
-# Section B: Similar Homes
-st.sidebar.subheader("🏠 Similar Homes Engine")
-candidate_homes = search_matches if not search_matches.empty else filtered_df
-reference_house_id = st.sidebar.selectbox("1. Select Reference House", options=["Select a House..."] + candidate_homes['House_ID'].tolist(), index=0)
+# --- 5. "SIMILAR HOMES" EXPANDER (Hidden by default to keep UI clean) ---
 
 similar_homes = pd.DataFrame()
 ref_house = None
+reference_house_id = "Select a House..."
 
-if reference_house_id != "Select a House...":
-    ref_house = df[df['House_ID'] == reference_house_id].iloc[0]
-    st.sidebar.info(f"**Ref:** {ref_house['Building/Name']}\n\n📍 {ref_house['Building/Locality']} | 💰 {ref_house['Clean_Price']} L")
+with st.expander("🛠️ Compare & Analyze (Find Similar Homes)", expanded=False):
+    c_adv1, c_adv2, c_adv3 = st.columns([2, 1, 1])
     
-    col_s1, col_s2 = st.sidebar.columns(2)
-    price_range = col_s1.slider("± Price (L)", 5, 100, 20)
-    dist_radius = col_s2.slider("Radius (km)", 0.5, 10.0, 2.0)
+    # Dropdown Logic
+    candidate_homes = search_matches if not search_matches.empty else filtered_df
+    with c_adv1:
+        reference_house_id = st.selectbox("Select Reference House", options=["Select a House..."] + candidate_homes['House_ID'].tolist())
     
-    valid_status_mask = df['Internal/Status'].isin(default_statuses)
-    config_mask = df['BHK_Num'] >= ref_house['BHK_Num']
-    if pd.notnull(ref_house['Clean_Price']):
-        min_p = ref_house['Clean_Price'] - price_range
-        max_p = ref_house['Clean_Price'] + price_range
-        price_mask = (df['Clean_Price'] >= min_p) & (df['Clean_Price'] <= max_p)
-    else:
-        price_mask = [True] * len(df)
+    with c_adv2:
+        price_range = st.slider("± Price (Lakhs)", 5, 100, 20)
+    
+    with c_adv3:
+        dist_radius = st.slider("Radius (km)", 0.5, 10.0, 2.0)
+
+    # Calculation Logic
+    if reference_house_id != "Select a House...":
+        ref_house = df[df['House_ID'] == reference_house_id].iloc[0]
+        st.info(f"**Selected:** {ref_house['Building/Name']} | {ref_house['Building/Locality']} | {ref_house['Home/Configuration']} | {ref_house['Clean_Price']} L")
         
-    candidates = df[valid_status_mask & config_mask & price_mask].copy()
-    if not candidates.empty:
-        candidates['Distance_km'] = haversine_vectorized(
-            ref_house['Building/Lat'], ref_house['Building/Long'], 
-            candidates['Building/Lat'].values, candidates['Building/Long'].values
-        )
-        similar_homes = candidates[(candidates['Distance_km'] <= dist_radius) & (candidates['House_ID'] != reference_house_id)]
-        similar_homes = similar_homes.sort_values(by="Clean_Price", ascending=True)
-    st.sidebar.metric("Similar Homes Found", len(similar_homes))
+        valid_status_mask = df['Internal/Status'].isin(default_statuses)
+        config_mask = df['BHK_Num'] >= ref_house['BHK_Num']
+        
+        if pd.notnull(ref_house['Clean_Price']):
+            min_p = ref_house['Clean_Price'] - price_range
+            max_p = ref_house['Clean_Price'] + price_range
+            price_mask = (df['Clean_Price'] >= min_p) & (df['Clean_Price'] <= max_p)
+        else:
+            price_mask = [True] * len(df)
+            
+        candidates = df[valid_status_mask & config_mask & price_mask].copy()
+        if not candidates.empty:
+            candidates['Distance_km'] = haversine_vectorized(
+                ref_house['Building/Lat'], ref_house['Building/Long'], 
+                candidates['Building/Lat'].values, candidates['Building/Long'].values
+            )
+            similar_homes = candidates[(candidates['Distance_km'] <= dist_radius) & (candidates['House_ID'] != reference_house_id)]
+            similar_homes = similar_homes.sort_values(by="Clean_Price", ascending=True)
 
-# --- 4. MAIN MAP ---
-st.title("Discovery Portal")
-with st.expander("ℹ️ **How to use this tool**"):
-    st.markdown("""
-    1. **Blue Pins:** Buildings (Hover to see all units sorted by value).
-    2. **Red Stars:** Search results (Hover to see specific unit + others in building).
-    3. **Green Thumbs:** Recommended similar homes.
-    """)
+
+# --- 6. MAP VISUALIZATION ---
 
 # Center Logic
 if not search_matches.empty:
@@ -173,141 +186,68 @@ else:
 m = folium.Map(location=[center_lat, center_long], zoom_start=zoom, prefer_canvas=True)
 
 # --- TOOLTIP HELPERS ---
-
 def create_table_row(row, bg_color="#fff", bold=False):
-    """Helper to create a single row in the HTML table"""
     status_icon = {'✅ Live': '✅', '☑️ Sold': '🔴', '⏳On Hold': 'Of', 'Unknown': '❓'}.get(row['Internal/Status'], '🔹')
     price_txt = f"{row['Clean_Price']}L" if pd.notnull(row['Clean_Price']) else "N/A"
     style_td = "padding: 3px;"
     style_price = "padding: 3px; font-weight: bold;" if not bold else "padding: 3px; font-weight: 800; color: #d32f2f;"
-    
-    return f"""
-        <tr style="border-bottom: 1px solid #eee; background-color: {bg_color};">
-            <td style="{style_td}">{row['Home/Configuration']}</td>
-            <td style="{style_price}">{price_txt}</td>
-            <td style="{style_td}">{status_icon}</td>
-            <td style="{style_td} color: #666; font-size: 11px;">{row['House_ID']}</td>
-        </tr>
-    """
+    return f"""<tr style="border-bottom: 1px solid #eee; background-color: {bg_color};"><td style="{style_td}">{row['Home/Configuration']}</td><td style="{style_price}">{price_txt}</td><td style="{style_td}">{status_icon}</td><td style="{style_td} color: #666; font-size: 11px;">{row['House_ID']}</td></tr>"""
 
 def create_building_tooltip(group_df, building_name, locality):
-    """Tooltip for BLUE pins: Shows all units in building"""
     sorted_group = group_df.sort_values('Clean_Psqft', ascending=True)
-    
-    html = f"""
-    <div style="font-family: sans-serif; min-width: 250px;">
-        <h4 style="margin-bottom: 2px; color: #3186cc;">{building_name}</h4>
-        <small style="color: #666;">📍 {locality}</small>
-        <hr style="margin: 5px 0;">
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
-            <tr style="text-align: left; background-color: #f0f0f0;">
-                <th>Config</th><th>Price</th><th>St</th><th>ID</th>
-            </tr>
-    """
-    for _, row in sorted_group.iterrows():
-        html += create_table_row(row)
-        
+    html = f"""<div style="font-family: sans-serif; min-width: 250px;"><h4 style="margin-bottom: 2px; color: #3186cc;">{building_name}</h4><small style="color: #666;">📍 {locality}</small><hr style="margin: 5px 0;"><table style="width: 100%; font-size: 12px; border-collapse: collapse;"><tr style="text-align: left; background-color: #f0f0f0;"><th>Config</th><th>Price</th><th>St</th><th>ID</th></tr>"""
+    for _, row in sorted_group.iterrows(): html += create_table_row(row)
     html += "</table></div>"
     return html
 
 def create_context_tooltip(target_row, full_df, label):
-    """Tooltip for RED/GREEN pins: Shows target unit first, then siblings"""
-    
-    # 1. Find siblings in same building
     b_name = target_row['Building/Name']
-    siblings = full_df[
-        (full_df['Building/Name'] == b_name) & 
-        (full_df['House_ID'] != target_row['House_ID'])
-    ]
-    
+    siblings = full_df[(full_df['Building/Name'] == b_name) & (full_df['House_ID'] != target_row['House_ID'])]
     valid_sibs = siblings[siblings['Internal/Status'].isin(default_statuses)].sort_values('Clean_Psqft', ascending=True)
-
-    html = f"""
-    <div style="font-family: sans-serif; min-width: 260px;">
-        <div style="background-color: #f8f9fa; padding: 5px; border-radius: 4px; border: 1px solid #ddd; margin-bottom: 5px;">
-            <strong style="color: #d32f2f;">{label}</strong><br>
-            <span style="font-size: 14px; font-weight: bold;">{target_row['Building/Name']}</span>
-        </div>
-        
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
-            <tr style="text-align: left; background-color: #f0f0f0;">
-                <th>Config</th><th>Price</th><th>St</th><th>ID</th>
-            </tr>
-            {create_table_row(target_row, bg_color="#fff3cd", bold=True)}
-    """
-    
+    html = f"""<div style="font-family: sans-serif; min-width: 260px;"><div style="background-color: #f8f9fa; padding: 5px; border-radius: 4px; border: 1px solid #ddd; margin-bottom: 5px;"><strong style="color: #d32f2f;">{label}</strong><br><span style="font-size: 14px; font-weight: bold;">{target_row['Building/Name']}</span></div><table style="width: 100%; font-size: 12px; border-collapse: collapse;"><tr style="text-align: left; background-color: #f0f0f0;"><th>Config</th><th>Price</th><th>St</th><th>ID</th></tr>{create_table_row(target_row, bg_color="#fff3cd", bold=True)}"""
     if not valid_sibs.empty:
-        html += f"""
-            <tr><td colspan="4" style="text-align: center; font-size: 10px; color: #888; padding: 2px;">
-                ▼ Other Units in Building ▼
-            </td></tr>
-        """
-        for _, row in valid_sibs.iterrows():
-            html += create_table_row(row)
-            
+        html += f"""<tr><td colspan="4" style="text-align: center; font-size: 10px; color: #888; padding: 2px;">▼ Other Units in Building ▼</td></tr>"""
+        for _, row in valid_sibs.iterrows(): html += create_table_row(row)
     html += "</table></div>"
     return html
 
-# Separate the datasets
+# Separate datasets
 special_ids = []
 if not similar_homes.empty: special_ids.extend(similar_homes['House_ID'].tolist())
 if not search_matches.empty: special_ids.extend(search_matches['House_ID'].tolist())
 if reference_house_id != "Select a House...": special_ids.append(reference_house_id)
 
-# 1. BLUE LAYER (General Inventory) - GROUPED BY BUILDING
+# 1. BLUE LAYER (General)
 blue_df = filtered_df[~filtered_df['House_ID'].isin(special_ids)]
 grouped = blue_df.groupby(['Building/Name', 'Building/Lat', 'Building/Long', 'Building/Locality'])
-
 for (name, lat, lon, loc), group in grouped:
-    folium.Marker(
-        location=[lat, lon],
-        popup=folium.Popup(create_building_tooltip(group, name, loc), max_width=300),
-        tooltip=f"{name} ({len(group)} Units)",
-        icon=folium.Icon(color="blue", icon="building", prefix="fa"), 
-    ).add_to(m)
+    folium.Marker([lat, lon], popup=folium.Popup(create_building_tooltip(group, name, loc), max_width=300), tooltip=f"{name} ({len(group)} Units)", icon=folium.Icon(color="blue", icon="building", prefix="fa")).add_to(m)
 
-# 2. GREEN LAYER (Similar) - Context Aware
+# 2. GREEN LAYER (Similar)
 if not similar_homes.empty:
     for _, row in similar_homes.iterrows():
-        folium.Marker(
-            [row['Building/Lat'], row['Building/Long']],
-            popup=folium.Popup(create_context_tooltip(row, df, "SIMILAR MATCH"), max_width=300),
-            tooltip=f"Similar: {row['House_ID']}",
-            icon=folium.Icon(color="green", icon="thumbs-up", prefix="fa"),
-        ).add_to(m)
+        folium.Marker([row['Building/Lat'], row['Building/Long']], popup=folium.Popup(create_context_tooltip(row, df, "SIMILAR MATCH"), max_width=300), tooltip=f"Similar: {row['House_ID']}", icon=folium.Icon(color="green", icon="thumbs-up", prefix="fa")).add_to(m)
 
-# 3. RED LAYER (Search) - Context Aware
+# 3. RED LAYER (Search)
 if not search_matches.empty:
     for _, row in search_matches.iterrows():
         if not similar_homes.empty and row['House_ID'] in similar_homes['House_ID'].values: continue
-        folium.Marker(
-            [row['Building/Lat'], row['Building/Long']],
-            popup=folium.Popup(create_context_tooltip(row, df, "SEARCH RESULT"), max_width=300),
-            tooltip=f"Match: {row['House_ID']}",
-            icon=folium.Icon(color="red", icon="star", prefix="fa"),
-        ).add_to(m)
+        folium.Marker([row['Building/Lat'], row['Building/Long']], popup=folium.Popup(create_context_tooltip(row, df, "SEARCH RESULT"), max_width=300), tooltip=f"Match: {row['House_ID']}", icon=folium.Icon(color="red", icon="star", prefix="fa")).add_to(m)
 
 # 4. BLACK LAYER (Reference)
 if reference_house_id != "Select a House...":
-    folium.Marker(
-        [ref_house['Building/Lat'], ref_house['Building/Long']],
-        popup=folium.Popup(create_context_tooltip(ref_house, df, "REFERENCE HOUSE"), max_width=300),
-        tooltip="REFERENCE HOUSE",
-        icon=folium.Icon(color="black", icon="user", prefix="fa"),
-    ).add_to(m)
+    folium.Marker([ref_house['Building/Lat'], ref_house['Building/Long']], popup=folium.Popup(create_context_tooltip(ref_house, df, "REFERENCE HOUSE"), max_width=300), tooltip="REFERENCE HOUSE", icon=folium.Icon(color="black", icon="user", prefix="fa")).add_to(m)
 
-# 🚀 THE FIX: returned_objects=[] prevents the map from sending zoom/pan data back to Python
-st_folium(m, width="100%", height=550, returned_objects=[])
+st_folium(m, width="100%", height=600, returned_objects=[])
 
-# Data Table
+# --- 7. DATA TABLES ---
+
 if not similar_homes.empty:
     st.subheader(f"✅ Recommended Similar Homes ({len(similar_homes)})")
-    display_cols = ['House_ID', 'Building/Name', 'Building/Locality', 'Internal/Status', 'Home/Configuration', 
-                   'Home/Ask_Price (lacs)', 'Home/Area (super-builtup)', 'Clean_Psqft']
-    display_df = similar_homes[display_cols].copy()
+    display_df = similar_homes[['House_ID', 'Building/Name', 'Building/Locality', 'Internal/Status', 'Home/Configuration', 'Clean_Price', 'Home/Area (super-builtup)', 'Clean_Psqft']].copy()
     display_df.columns = ['ID', 'Project', 'Locality', 'Status', 'Config', 'Price (L)', 'Area (sqft)', 'Price/Sqft']
     st.dataframe(display_df.style.format({"Price (L)": "{:.2f}", "Price/Sqft": "{:.0f}"}), use_container_width=True)
 
 elif reference_house_id == "Select a House..." and not search_matches.empty:
-    st.subheader("Search Results")
+    st.subheader(f"Search Results ({len(search_matches)})")
     st.dataframe(search_matches[['House_ID', 'Building/Name', 'Building/Locality', 'Internal/Status', 'Home/Ask_Price (lacs)']], use_container_width=True)
