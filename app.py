@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import folium
-from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 import numpy as np
 import re
@@ -54,12 +53,10 @@ def haversine_vectorized(lat1, lon1, lat2_array, lon2_array):
 def load_data(csv_path):
     df = pd.read_csv(csv_path)
     
-    # Force numeric coords
     df['Building/Lat'] = pd.to_numeric(df['Building/Lat'], errors='coerce')
     df['Building/Long'] = pd.to_numeric(df['Building/Long'], errors='coerce')
     df = df.dropna(subset=['Building/Lat', 'Building/Long'])
     
-    # Clean Price
     def clean_price(val):
         try:
             return float(val)
@@ -67,14 +64,12 @@ def load_data(csv_path):
             return None
     df['Clean_Price'] = df['Home/Ask_Price (lacs)'].apply(clean_price)
     
-    # Clean Config
     def extract_bhk(val):
         if pd.isna(val): return 0
         match = re.search(r'(\d+)', str(val))
         return int(match.group(1)) if match else 0
     df['BHK_Num'] = df['Home/Configuration'].apply(extract_bhk)
     
-    # Fill text gaps
     df['Internal/Status'] = df['Internal/Status'].fillna('Unknown')
     df['Building/Locality'] = df['Building/Locality'].fillna('')
     
@@ -97,23 +92,16 @@ st.sidebar.divider()
 
 # Section A: Filter & Search
 st.sidebar.subheader("🔍 Search Inventory")
-
-# Search Input
 search_query = st.sidebar.text_input("Search (Locality, Project, ID)", placeholder="e.g. Whitefield, Godrej...")
 
 # Status Filter
 all_statuses = sorted(df['Internal/Status'].unique().tolist())
 default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
-
-selected_statuses = st.sidebar.multiselect(
-    "Filter Status",
-    options=all_statuses,
-    default=default_statuses
-)
+selected_statuses = st.sidebar.multiselect("Filter Status", options=all_statuses, default=default_statuses)
 
 filtered_df = df[df['Internal/Status'].isin(selected_statuses)]
 
-# Search Logic (Includes Locality)
+# Search Logic
 search_matches = pd.DataFrame()
 if search_query:
     mask = (
@@ -129,35 +117,24 @@ if search_query:
 
 st.sidebar.divider()
 
-# Section B: Similar Homes Engine
+# Section B: Similar Homes
 st.sidebar.subheader("🏠 Similar Homes Engine")
-
 candidate_homes = search_matches if not search_matches.empty else filtered_df
-reference_house_id = st.sidebar.selectbox(
-    "1. Select Reference House",
-    options=["Select a House..."] + candidate_homes['House_ID'].tolist(),
-    index=0
-)
+reference_house_id = st.sidebar.selectbox("1. Select Reference House", options=["Select a House..."] + candidate_homes['House_ID'].tolist(), index=0)
 
 similar_homes = pd.DataFrame()
 ref_house = None
 
 if reference_house_id != "Select a House...":
     ref_house = df[df['House_ID'] == reference_house_id].iloc[0]
-    
-    st.sidebar.info(
-        f"**Ref:** {ref_house['Building/Name']}\n\n"
-        f"📍 {ref_house['Building/Locality']} | 💰 {ref_house['Clean_Price']} L"
-    )
+    st.sidebar.info(f"**Ref:** {ref_house['Building/Name']}\n\n📍 {ref_house['Building/Locality']} | 💰 {ref_house['Clean_Price']} L")
     
     col_s1, col_s2 = st.sidebar.columns(2)
     price_range = col_s1.slider("± Price (L)", 5, 100, 20)
     dist_radius = col_s2.slider("Radius (km)", 0.5, 10.0, 2.0)
     
-    # Filter Logic
     valid_status_mask = df['Internal/Status'].isin(default_statuses)
     config_mask = df['BHK_Num'] >= ref_house['BHK_Num']
-    
     if pd.notnull(ref_house['Clean_Price']):
         min_p = ref_house['Clean_Price'] - price_range
         max_p = ref_house['Clean_Price'] + price_range
@@ -166,84 +143,63 @@ if reference_house_id != "Select a House...":
         price_mask = [True] * len(df)
         
     candidates = df[valid_status_mask & config_mask & price_mask].copy()
-    
-    # Fast Distance Logic
     if not candidates.empty:
         candidates['Distance_km'] = haversine_vectorized(
-            ref_house['Building/Lat'], 
-            ref_house['Building/Long'], 
-            candidates['Building/Lat'].values, 
-            candidates['Building/Long'].values
+            ref_house['Building/Lat'], ref_house['Building/Long'], 
+            candidates['Building/Lat'].values, candidates['Building/Long'].values
         )
-        
-        similar_homes = candidates[
-            (candidates['Distance_km'] <= dist_radius) & 
-            (candidates['House_ID'] != reference_house_id)
-        ]
-        
+        similar_homes = candidates[(candidates['Distance_km'] <= dist_radius) & (candidates['House_ID'] != reference_house_id)]
         similar_homes = similar_homes.sort_values(by="Clean_Price", ascending=True)
-    
     st.sidebar.metric("Similar Homes Found", len(similar_homes))
 
-# --- 5. MAIN PAGE UI ---
-
+# --- 5. MAIN MAP ---
 st.title("Discovery Portal")
-
 with st.expander("ℹ️ **How to use this tool**"):
     st.markdown("""
-    1. **Explore the Map:** Zoom in to see individual pins. Numbers indicate clustered homes.
-    2. **Search:** Use the sidebar to find a Project, **Locality**, or ID. 
-    3. **Find Comparisons:** Select a "Reference House" to spot similar deals (Green pins) nearby.
+    1. **Blue Dots:** General inventory (Non-interactive for speed).
+    2. **Red Pins:** Search results.
+    3. **Green Pins:** Recommended similar homes.
     """)
 
-# Map Center Logic
+# Center Logic
 if not search_matches.empty:
-    center_lat = search_matches['Building/Lat'].mean()
-    center_long = search_matches['Building/Long'].mean()
-    zoom = 12
+    center_lat, center_long, zoom = search_matches['Building/Lat'].mean(), search_matches['Building/Long'].mean(), 12
 elif reference_house_id != "Select a House...":
-    center_lat = ref_house['Building/Lat']
-    center_long = ref_house['Building/Long']
-    zoom = 13
+    center_lat, center_long, zoom = ref_house['Building/Lat'], ref_house['Building/Long'], 13
 else:
-    center_lat = 12.9716 
-    center_long = 77.5946
-    zoom = 11
+    center_lat, center_long, zoom = 12.9716, 77.5946, 11
 
-m = folium.Map(location=[center_lat, center_long], zoom_start=zoom)
+m = folium.Map(location=[center_lat, center_long], zoom_start=zoom, prefer_canvas=True)
 
 def create_tooltip(row, label=None):
-    status_emoji = {
-        '✅ Live': '✅', '☑️ Sold': '🔴', '⏳On Hold': 'Of', 'Unknown': '❓'
-    }.get(row['Internal/Status'], '🔹')
-    
+    status_emoji = {'✅ Live': '✅', '☑️ Sold': '🔴', '⏳On Hold': 'Of', 'Unknown': '❓'}.get(row['Internal/Status'], '🔹')
     title = f"<b>{label}</b><br>" if label else ""
     def safe_val(v): return v if pd.notnull(v) else "N/A"
-    
-    return f"""
-    {title}
-    <b>ID:</b> {safe_val(row['House_ID'])}<br>
-    <b>Project:</b> {safe_val(row['Building/Name'])}<br>
-    <b>Locality:</b> {safe_val(row['Building/Locality'])}<br>
-    <b>Price:</b> {safe_val(row['Home/Ask_Price (lacs)'])} L<br>
-    <b>Config:</b> {safe_val(row['Home/Configuration'])}<br>
-    <b>Status:</b> {status_emoji} {safe_val(row['Internal/Status'])}
-    """
+    return f"""{title}<b>ID:</b> {safe_val(row['House_ID'])}<br><b>Project:</b> {safe_val(row['Building/Name'])}<br><b>Locality:</b> {safe_val(row['Building/Locality'])}<br><b>Price:</b> {safe_val(row['Home/Ask_Price (lacs)'])} L<br><b>Config:</b> {safe_val(row['Home/Configuration'])}<br><b>Status:</b> {status_emoji} {safe_val(row['Internal/Status'])}"""
 
-# 🚀 PERFORMANCE FIX: Use MarkerCluster for the "Standard" (Blue) pins
-# This prevents the map from lagging when showing 1000+ homes
-marker_cluster = MarkerCluster().add_to(m)
-
-# Collect special IDs to exclude from the cluster
+# Separate the datasets
 special_ids = []
-if not similar_homes.empty:
-    special_ids.extend(similar_homes['House_ID'].tolist())
-if not search_matches.empty:
-    special_ids.extend(search_matches['House_ID'].tolist())
-if reference_house_id != "Select a House...":
-    special_ids.append(reference_house_id)
+if not similar_homes.empty: special_ids.extend(similar_homes['House_ID'].tolist())
+if not search_matches.empty: special_ids.extend(search_matches['House_ID'].tolist())
+if reference_house_id != "Select a House...": special_ids.append(reference_house_id)
 
-# 1. Plot Similar Homes (Green) - NO CLUSTER (Always Visible)
+# 1. BLUE LAYER (The Heavy Lifter) - Uses CircleMarker for Speed
+# We filter out the special IDs so we don't draw double pins
+blue_df = filtered_df[~filtered_df['House_ID'].isin(special_ids)]
+
+for _, row in blue_df.iterrows():
+    folium.CircleMarker(
+        location=[row['Building/Lat'], row['Building/Long']],
+        radius=5,           # Small radius
+        color='#3186cc',    # Blue border
+        fill=True,
+        fill_color='#3186cc',
+        fill_opacity=0.6,
+        tooltip=create_tooltip(row),
+        weight=1
+    ).add_to(m)
+
+# 2. GREEN LAYER (Similar) - Uses Big Icons
 if not similar_homes.empty:
     for _, row in similar_homes.iterrows():
         folium.Marker(
@@ -252,39 +208,27 @@ if not similar_homes.empty:
             icon=folium.Icon(color="green", icon="thumbs-up", prefix="fa"),
         ).add_to(m)
 
-# 2. Plot Search Matches (Red) - NO CLUSTER (Always Visible)
+# 3. RED LAYER (Search) - Uses Big Icons
 if not search_matches.empty:
     for _, row in search_matches.iterrows():
-        # Avoid duplicate pins if it's already green
-        if not similar_homes.empty and row['House_ID'] in similar_homes['House_ID'].values:
-            continue
+        if not similar_homes.empty and row['House_ID'] in similar_homes['House_ID'].values: continue
         folium.Marker(
             [row['Building/Lat'], row['Building/Long']],
             tooltip=create_tooltip(row, "SEARCH RESULT"),
             icon=folium.Icon(color="red", icon="star", prefix="fa"),
         ).add_to(m)
 
-# 3. Plot The Rest (Blue) - INSIDE CLUSTER (For Speed)
-for _, row in filtered_df.iterrows():
-    if row['House_ID'] in special_ids: continue
-    
-    # Create marker
-    folium.Marker(
-        [row['Building/Lat'], row['Building/Long']],
-        tooltip=create_tooltip(row),
-        icon=folium.Icon(color="blue", icon="info-sign"),
-    ).add_to(marker_cluster) # <--- ADD TO CLUSTER, NOT MAP DIRECTLY
-
-# 4. Plot Reference House (Black) - NO CLUSTER
+# 4. BLACK LAYER (Reference)
 if reference_house_id != "Select a House...":
-    # Ref house data is already in 'ref_house' variable
     folium.Marker(
         [ref_house['Building/Lat'], ref_house['Building/Long']],
         tooltip=create_tooltip(ref_house, "REFERENCE HOUSE"),
         icon=folium.Icon(color="black", icon="user", prefix="fa"),
     ).add_to(m)
 
-st_folium(m, width="100%", height=550)
+# 🚀 THE FIX: returned_objects=[] prevents the map from sending zoom/pan data back to Python
+# This stops the "running man" reloading animation when you move the map.
+st_folium(m, width="100%", height=550, returned_objects=[])
 
 # Data Table
 if not similar_homes.empty:
@@ -294,7 +238,6 @@ if not similar_homes.empty:
     display_df = similar_homes[display_cols].copy()
     display_df.columns = ['ID', 'Project', 'Locality', 'Status', 'Config', 'Price (L)', 'Area (sqft)', 'Distance (km)']
     st.dataframe(display_df.style.format({"Distance (km)": "{:.2f}", "Price (L)": "{:.2f}"}), use_container_width=True)
-
 elif reference_house_id == "Select a House..." and not search_matches.empty:
     st.subheader("Search Results")
     st.dataframe(search_matches[['House_ID', 'Building/Name', 'Building/Locality', 'Internal/Status', 'Home/Ask_Price (lacs)']], use_container_width=True)
