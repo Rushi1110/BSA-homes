@@ -7,7 +7,7 @@ import re
 
 st.set_page_config(layout="wide", page_title="Jumbo Homes")
 
-# --- CUSTOM CSS FOR COMPACT LOOK ---
+# --- CUSTOM CSS (Clean, but not broken) ---
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -16,21 +16,10 @@ hide_st_style = """
             [data-testid="stDecoration"] {display: none;}
             .stDeployButton {display:none;}
             
-            /* REMOVE TOP PADDING ("Super Small" Header) */
+            /* Remove top padding but keep it safe */
             .block-container {
-                padding-top: 0rem !important;
+                padding-top: 1rem !important;
                 padding-bottom: 0rem !important;
-                margin-top: 1rem !important;
-            }
-            
-            /* Compact Columns */
-            div[data-testid="column"] {
-                padding: 0px;
-            }
-            
-            /* Remove gap between elements */
-            .st-emotion-cache-1y4p8pa {
-                padding-top: 0px;
             }
             </style>
             """
@@ -102,27 +91,36 @@ except FileNotFoundError:
     st.error("❌ Critical Error: 'Homes.csv' not found.")
     st.stop()
 
-# --- 3. COMPACT TOP BAR ---
+# --- 3. UI LAYOUT ---
 
-# 4 Columns: Logo (Small) | Search | Filter | Reset
-col1, col2, col3, col4 = st.columns([0.5, 3, 1.5, 0.5], gap="small")
+# ROW 1: TOP RIBBON (Logo + Logout)
+row1_col1, row1_col2 = st.columns([6, 1])
 
-with col1:
-    st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=80)
+with row1_col1:
+    st.image("https://res.cloudinary.com/dewcjgpc7/image/upload/v1763541879/10_jpqpx1.png", width=140)
 
-with col2:
-    search_query = st.text_input("Search", placeholder="🔍 Search Locality, Project, ID...", label_visibility="collapsed")
-
-with col3:
-    all_statuses = sorted(df['Internal/Status'].unique().tolist())
-    default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
-    selected_statuses = st.multiselect("Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Status")
-
-with col4:
-    # "Clear" button to quickly reset filters/search
-    if st.button("🔄", help="Reset App"):
+with row1_col2:
+    if st.button("Logout", use_container_width=True):
         st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
 
+st.write("") # Spacer
+
+# ROW 2: CONTROLS (Search + Filters + Reset)
+# We use a container to visually group them
+with st.container():
+    col1, col2, col3 = st.columns([3, 1.5, 0.5])
+
+    with col1:
+        search_query = st.text_input("Search", placeholder="🔍 Search Locality, Project, or ID...", label_visibility="collapsed")
+
+    with col2:
+        all_statuses = sorted(df['Internal/Status'].unique().tolist())
+        default_statuses = [s for s in all_statuses if any(x in s for x in ['Live', 'Inspection Pending', 'Catalogue Pending'])]
+        selected_statuses = st.multiselect("Status", options=all_statuses, default=default_statuses, label_visibility="collapsed", placeholder="Filter Status")
+
+    with col3:
+        if st.button("🔄", help="Reset Filters"):
+            st.markdown('<meta http-equiv="refresh" content="0;URL=/">', unsafe_allow_html=True)
 
 # --- 4. LOGIC ENGINE ---
 
@@ -138,13 +136,13 @@ if search_query:
     )
     search_matches = filtered_df[mask]
 
-# --- 5. "SIMILAR HOMES" EXPANDER (Hidden by default) ---
+# --- 5. "SIMILAR HOMES" EXPANDER ---
 
 similar_homes = pd.DataFrame()
 ref_house = None
 reference_house_id = "Select a House..."
 
-with st.expander("🛠️ Comparison Tools (Similar Homes)", expanded=False):
+with st.expander("🛠️ Comparison Tools (Find Similar Homes)", expanded=False):
     c_adv1, c_adv2, c_adv3 = st.columns([2, 1, 1])
     
     candidate_homes = search_matches if not search_matches.empty else filtered_df
