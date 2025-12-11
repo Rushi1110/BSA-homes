@@ -156,9 +156,9 @@ if reference_house_id != "Select a House...":
 st.title("Discovery Portal")
 with st.expander("ℹ️ **How to use this tool**"):
     st.markdown("""
-    1. **Blue Dots:** General inventory (Non-interactive for speed).
-    2. **Red Pins:** Search results.
-    3. **Green Pins:** Recommended similar homes.
+    1. **Blue Pins:** General inventory.
+    2. **Red Stars:** Search results.
+    3. **Green Thumbs:** Recommended similar homes.
     """)
 
 # Center Logic
@@ -183,23 +183,18 @@ if not similar_homes.empty: special_ids.extend(similar_homes['House_ID'].tolist(
 if not search_matches.empty: special_ids.extend(search_matches['House_ID'].tolist())
 if reference_house_id != "Select a House...": special_ids.append(reference_house_id)
 
-# 1. BLUE LAYER (The Heavy Lifter) - Uses CircleMarker for Speed
+# 1. BLUE LAYER (General Inventory) - NOW USING STANDARD PINS
 # We filter out the special IDs so we don't draw double pins
 blue_df = filtered_df[~filtered_df['House_ID'].isin(special_ids)]
 
 for _, row in blue_df.iterrows():
-    folium.CircleMarker(
+    folium.Marker(
         location=[row['Building/Lat'], row['Building/Long']],
-        radius=5,           # Small radius
-        color='#3186cc',    # Blue border
-        fill=True,
-        fill_color='#3186cc',
-        fill_opacity=0.6,
         tooltip=create_tooltip(row),
-        weight=1
+        icon=folium.Icon(color="blue", icon="home", prefix="fa"), # <--- CHANGED TO PIN
     ).add_to(m)
 
-# 2. GREEN LAYER (Similar) - Uses Big Icons
+# 2. GREEN LAYER (Similar)
 if not similar_homes.empty:
     for _, row in similar_homes.iterrows():
         folium.Marker(
@@ -208,7 +203,7 @@ if not similar_homes.empty:
             icon=folium.Icon(color="green", icon="thumbs-up", prefix="fa"),
         ).add_to(m)
 
-# 3. RED LAYER (Search) - Uses Big Icons
+# 3. RED LAYER (Search)
 if not search_matches.empty:
     for _, row in search_matches.iterrows():
         if not similar_homes.empty and row['House_ID'] in similar_homes['House_ID'].values: continue
@@ -227,7 +222,6 @@ if reference_house_id != "Select a House...":
     ).add_to(m)
 
 # 🚀 THE FIX: returned_objects=[] prevents the map from sending zoom/pan data back to Python
-# This stops the "running man" reloading animation when you move the map.
 st_folium(m, width="100%", height=550, returned_objects=[])
 
 # Data Table
@@ -238,6 +232,7 @@ if not similar_homes.empty:
     display_df = similar_homes[display_cols].copy()
     display_df.columns = ['ID', 'Project', 'Locality', 'Status', 'Config', 'Price (L)', 'Area (sqft)', 'Distance (km)']
     st.dataframe(display_df.style.format({"Distance (km)": "{:.2f}", "Price (L)": "{:.2f}"}), use_container_width=True)
+
 elif reference_house_id == "Select a House..." and not search_matches.empty:
     st.subheader("Search Results")
     st.dataframe(search_matches[['House_ID', 'Building/Name', 'Building/Locality', 'Internal/Status', 'Home/Ask_Price (lacs)']], use_container_width=True)
