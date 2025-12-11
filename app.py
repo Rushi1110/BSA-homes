@@ -7,12 +7,12 @@ import re
 
 st.set_page_config(layout="wide", page_title="Jumbo Homes - Discovery Portal")
 
-# --- HIDE STREAMLIT DEFAULT BUTTONS ---
+# --- HIDE STREAMLIT STYLE (FIXED) ---
+# We removed 'header {visibility: hidden;}' so the Sidebar Toggle remains visible.
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            header {visibility: hidden;}
             .stDeployButton {display:none;}
             </style>
             """
@@ -217,11 +217,7 @@ def create_context_tooltip(target_row, full_df, label):
         (full_df['Building/Name'] == b_name) & 
         (full_df['House_ID'] != target_row['House_ID'])
     ]
-    # Filter siblings to only show relevant statuses if desired (using currently selected filters)
-    # but usually "others in building" implies showing all available ones.
-    # We will stick to the 'filtered_df' subset logic implicitly if we passed filtered_df, 
-    # but here we likely want to show all VALID siblings (Live/Pending) even if not currently filtered?
-    # Let's use 'full_df' but filter for valid statuses to avoid showing junk.
+    
     valid_sibs = siblings[siblings['Internal/Status'].isin(default_statuses)].sort_values('Clean_Psqft', ascending=True)
 
     html = f"""
@@ -273,7 +269,6 @@ if not similar_homes.empty:
     for _, row in similar_homes.iterrows():
         folium.Marker(
             [row['Building/Lat'], row['Building/Long']],
-            # Pass the FULL df so we can find siblings even if they are filtered out of current view
             popup=folium.Popup(create_context_tooltip(row, df, "SIMILAR MATCH"), max_width=300),
             tooltip=f"Similar: {row['House_ID']}",
             icon=folium.Icon(color="green", icon="thumbs-up", prefix="fa"),
