@@ -54,17 +54,14 @@ def load_data(csv_path):
     # Clean Price Per Sqft (For Sorting)
     def clean_psqft(val):
         try:
-            # Remove commas and non-numeric chars
             clean_str = re.sub(r'[^\d.]', '', str(val))
             return float(clean_str)
         except:
-            return 999999.0 # Push to bottom if invalid
+            return 999999.0
     
-    # Assuming column name is 'Home/Price psqft', adjust if it differs in your CSV
     if 'Home/Price psqft' in df.columns:
         df['Clean_Psqft'] = df['Home/Price psqft'].apply(clean_psqft)
     else:
-        # Fallback if column missing
         df['Clean_Psqft'] = 0.0
 
     # Clean Config
@@ -159,7 +156,7 @@ st.title("Discovery Portal")
 with st.expander("ℹ️ **How to use this tool**"):
     st.markdown("""
     1. **Blue Pins:** Buildings (Hover to see all units sorted by value).
-    2. **Red Stars:** Search results.
+    2. **Red Stars:** Search results (Hover to see specific unit + others in building).
     3. **Green Thumbs:** Recommended similar homes.
     """)
 
@@ -173,48 +170,85 @@ else:
 
 m = folium.Map(location=[center_lat, center_long], zoom_start=zoom, prefer_canvas=True)
 
-# --- HELPER: Create Multi-Unit Tooltip ---
+# --- TOOLTIP HELPERS ---
+
+def create_table_row(row, bg_color="#fff", bold=False):
+    """Helper to create a single row in the HTML table"""
+    status_icon = {'✅ Live': '✅', '☑️ Sold': '🔴', '⏳On Hold': 'Of', 'Unknown': '❓'}.get(row['Internal/Status'], '🔹')
+    price_txt = f"{row['Clean_Price']}L" if pd.notnull(row['Clean_Price']) else "N/A"
+    style_td = "padding: 3px;"
+    style_price = "padding: 3px; font-weight: bold;" if not bold else "padding: 3px; font-weight: 800; color: #d32f2f;"
+    
+    return f"""
+        <tr style="border-bottom: 1px solid #eee; background-color: {bg_color};">
+            <td style="{style_td}">{row['Home/Configuration']}</td>
+            <td style="{style_price}">{price_txt}</td>
+            <td style="{style_td}">{status_icon}</td>
+            <td style="{style_td} color: #666; font-size: 11px;">{row['House_ID']}</td>
+        </tr>
+    """
+
 def create_building_tooltip(group_df, building_name, locality):
-    # Sort by Price Per Sqft (Low to High)
+    """Tooltip for BLUE pins: Shows all units in building"""
     sorted_group = group_df.sort_values('Clean_Psqft', ascending=True)
     
-    # Header
     html = f"""
     <div style="font-family: sans-serif; min-width: 250px;">
-        <h4 style="margin-bottom: 5px; color: #3186cc;">{building_name}</h4>
-        <small style="color: #666;">📍 {locality} ({len(group_df)} units)</small>
+        <h4 style="margin-bottom: 2px; color: #3186cc;">{building_name}</h4>
+        <small style="color: #666;">📍 {locality}</small>
         <hr style="margin: 5px 0;">
         <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
             <tr style="text-align: left; background-color: #f0f0f0;">
-                <th style="padding: 3px;">Config</th>
-                <th style="padding: 3px;">Price</th>
-                <th style="padding: 3px;">Status</th>
-                <th style="padding: 3px;">ID</th>
+                <th>Config</th><th>Price</th><th>St</th><th>ID</th>
             </tr>
     """
-    
-    # Rows for each house
     for _, row in sorted_group.iterrows():
-        status_icon = {'✅ Live': '✅', '☑️ Sold': '🔴', '⏳On Hold': 'Of', 'Unknown': '❓'}.get(row['Internal/Status'], '🔹')
-        price_txt = f"{row['Clean_Price']}L" if pd.notnull(row['Clean_Price']) else "N/A"
+        html += create_table_row(row)
         
-        html += f"""
-            <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 3px;">{row['Home/Configuration']}</td>
-                <td style="padding: 3px; font-weight: bold;">{price_txt}</td>
-                <td style="padding: 3px;">{status_icon}</td>
-                <td style="padding: 3px; color: #888;">{row['House_ID']}</td>
-            </tr>
-        """
-    
     html += "</table></div>"
     return html
 
-def create_single_tooltip(row, label=None):
-    status_emoji = {'✅ Live': '✅', '☑️ Sold': '🔴', '⏳On Hold': 'Of', 'Unknown': '❓'}.get(row['Internal/Status'], '🔹')
-    title = f"<b>{label}</b><br>" if label else ""
-    def safe_val(v): return v if pd.notnull(v) else "N/A"
-    return f"""{title}<b>ID:</b> {safe_val(row['House_ID'])}<br><b>Project:</b> {safe_val(row['Building/Name'])}<br><b>Locality:</b> {safe_val(row['Building/Locality'])}<br><b>Price:</b> {safe_val(row['Home/Ask_Price (lacs)'])} L<br><b>Config:</b> {safe_val(row['Home/Configuration'])}<br><b>Status:</b> {status_emoji} {safe_val(row['Internal/Status'])}"""
+def create_context_tooltip(target_row, full_df, label):
+    """Tooltip for RED/GREEN pins: Shows target unit first, then siblings"""
+    
+    # 1. Find siblings in same building
+    b_name = target_row['Building/Name']
+    siblings = full_df[
+        (full_df['Building/Name'] == b_name) & 
+        (full_df['House_ID'] != target_row['House_ID'])
+    ]
+    # Filter siblings to only show relevant statuses if desired (using currently selected filters)
+    # but usually "others in building" implies showing all available ones.
+    # We will stick to the 'filtered_df' subset logic implicitly if we passed filtered_df, 
+    # but here we likely want to show all VALID siblings (Live/Pending) even if not currently filtered?
+    # Let's use 'full_df' but filter for valid statuses to avoid showing junk.
+    valid_sibs = siblings[siblings['Internal/Status'].isin(default_statuses)].sort_values('Clean_Psqft', ascending=True)
+
+    html = f"""
+    <div style="font-family: sans-serif; min-width: 260px;">
+        <div style="background-color: #f8f9fa; padding: 5px; border-radius: 4px; border: 1px solid #ddd; margin-bottom: 5px;">
+            <strong style="color: #d32f2f;">{label}</strong><br>
+            <span style="font-size: 14px; font-weight: bold;">{target_row['Building/Name']}</span>
+        </div>
+        
+        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+            <tr style="text-align: left; background-color: #f0f0f0;">
+                <th>Config</th><th>Price</th><th>St</th><th>ID</th>
+            </tr>
+            {create_table_row(target_row, bg_color="#fff3cd", bold=True)}
+    """
+    
+    if not valid_sibs.empty:
+        html += f"""
+            <tr><td colspan="4" style="text-align: center; font-size: 10px; color: #888; padding: 2px;">
+                ▼ Other Units in Building ▼
+            </td></tr>
+        """
+        for _, row in valid_sibs.iterrows():
+            html += create_table_row(row)
+            
+    html += "</table></div>"
+    return html
 
 # Separate the datasets
 special_ids = []
@@ -224,12 +258,9 @@ if reference_house_id != "Select a House...": special_ids.append(reference_house
 
 # 1. BLUE LAYER (General Inventory) - GROUPED BY BUILDING
 blue_df = filtered_df[~filtered_df['House_ID'].isin(special_ids)]
-
-# Group by unique location (Name + Lat + Long) to handle phases/blocks if coords differ
 grouped = blue_df.groupby(['Building/Name', 'Building/Lat', 'Building/Long', 'Building/Locality'])
 
 for (name, lat, lon, loc), group in grouped:
-    # Create one pin per building
     folium.Marker(
         location=[lat, lon],
         popup=folium.Popup(create_building_tooltip(group, name, loc), max_width=300),
@@ -237,22 +268,25 @@ for (name, lat, lon, loc), group in grouped:
         icon=folium.Icon(color="blue", icon="building", prefix="fa"), 
     ).add_to(m)
 
-# 2. GREEN LAYER (Similar) - Individual Pins
+# 2. GREEN LAYER (Similar) - Context Aware
 if not similar_homes.empty:
     for _, row in similar_homes.iterrows():
         folium.Marker(
             [row['Building/Lat'], row['Building/Long']],
-            tooltip=create_single_tooltip(row, "SIMILAR MATCH"),
+            # Pass the FULL df so we can find siblings even if they are filtered out of current view
+            popup=folium.Popup(create_context_tooltip(row, df, "SIMILAR MATCH"), max_width=300),
+            tooltip=f"Similar: {row['House_ID']}",
             icon=folium.Icon(color="green", icon="thumbs-up", prefix="fa"),
         ).add_to(m)
 
-# 3. RED LAYER (Search) - Individual Pins
+# 3. RED LAYER (Search) - Context Aware
 if not search_matches.empty:
     for _, row in search_matches.iterrows():
         if not similar_homes.empty and row['House_ID'] in similar_homes['House_ID'].values: continue
         folium.Marker(
             [row['Building/Lat'], row['Building/Long']],
-            tooltip=create_single_tooltip(row, "SEARCH RESULT"),
+            popup=folium.Popup(create_context_tooltip(row, df, "SEARCH RESULT"), max_width=300),
+            tooltip=f"Match: {row['House_ID']}",
             icon=folium.Icon(color="red", icon="star", prefix="fa"),
         ).add_to(m)
 
@@ -260,7 +294,8 @@ if not search_matches.empty:
 if reference_house_id != "Select a House...":
     folium.Marker(
         [ref_house['Building/Lat'], ref_house['Building/Long']],
-        tooltip=create_single_tooltip(ref_house, "REFERENCE HOUSE"),
+        popup=folium.Popup(create_context_tooltip(ref_house, df, "REFERENCE HOUSE"), max_width=300),
+        tooltip="REFERENCE HOUSE",
         icon=folium.Icon(color="black", icon="user", prefix="fa"),
     ).add_to(m)
 
